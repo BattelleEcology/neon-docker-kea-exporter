@@ -6,11 +6,13 @@ RUN addgroup -g 101 kea &&\
     mkdir /usr/app &&\
     chown kea:kea /usr/app
 
+COPY requirements.txt /usr/app/
+
 USER kea
 RUN python3 -mvenv /usr/app
 ENV PATH="/usr/app/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 RUN pip install --upgrade pip &&\
-    pip install kea-exporter==0.5.1
+    pip install -r /usr/app/requirements.txt
 
 
 ENTRYPOINT ["kea-exporter"]
