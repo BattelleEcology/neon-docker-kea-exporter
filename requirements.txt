@@ -14,5 +14,5 @@ prometheus-client==0.22.1
     # via kea-exporter
 requests==2.32.4
     # via kea-exporter
-urllib3==2.4.0
+urllib3==2.5.0
     # via requests
