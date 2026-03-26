@@ -1,4 +1,4 @@
-FROM alpine:3.23.2
+FROM alpine:3.23.3
 
 RUN addgroup -g 101 kea &&\
     adduser kea -G kea -S &&\
