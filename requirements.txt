@@ -8,7 +8,7 @@ click==8.4.2
     # via kea-exporter
 idna==3.18
     # via requests
-kea-exporter==0.7.0
+kea-exporter==0.7.1
     # via -r requirements.in
 prometheus-client==0.25.0
     # via kea-exporter
