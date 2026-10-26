@@ -1,22 +1,29 @@
 ---
 version: 2
+# One PR for the image's Dockerfile (Alpine, uv) and Python (uv.lock) updates instead of one per ecosystem
+multi-ecosystem-groups:
+  image:
+    schedule:
+      interval: "daily"
 updates:
   - package-ecosystem: "docker"
     directory: "/"
-    schedule:
-      interval: "daily"
+    # patterns is required for ecosystems in a multi-ecosystem group
+    patterns:
+      - "*"
+    multi-ecosystem-group: "image"
+  - package-ecosystem: "uv"
+    directory: "/"
+    patterns:
+      - "*"
+    multi-ecosystem-group: "image"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       # Check for updates to GitHub Actions every weekday
       interval: "daily"
-  - package-ecosystem: "pip"
-    directory: "/"
-    schedule:
-      interval: "daily"
-    # One PR for all pinned Python packages in requirements.txt instead of one per package
+    # One PR for all GitHub Actions updates instead of one per action
     groups:
-      python-packages:
+      github-actions:
         patterns:
           - "*"
-

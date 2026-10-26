@@ -1,0 +1,14 @@
+[project]
+name = "neon-docker-kea-exporter"
+version = "0.0.0"
+description = "ISC kea dhcp exporter for prometheus metrics"
+readme = "README.md"
+# Matches the python3 package in the Alpine base image
+requires-python = ">=3.14"
+dependencies = [
+    "kea-exporter>=0.7.1",
+]
+
+[tool.uv]
+# Only the dependencies are installed; this repo has no Python package of its own
+package = false
