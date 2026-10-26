@@ -14,4 +14,9 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    # One PR for all pinned Python packages in requirements.txt instead of one per package
+    groups:
+      python-packages:
+        patterns:
+          - "*"
 
