@@ -3,7 +3,7 @@ name = "neon-docker-kea-exporter"
 version = "0.0.0"
 description = "ISC kea dhcp exporter for prometheus metrics"
 readme = "README.md"
-# Matches the python3 package in the Alpine base image
+# Lowest supported Python. The image uses the uv-managed Python pinned in .python-version
 requires-python = ">=3.14"
 dependencies = [
     "kea-exporter>=0.7.1",
