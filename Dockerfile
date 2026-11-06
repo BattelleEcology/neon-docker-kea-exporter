@@ -1,6 +1,6 @@
-FROM ghcr.io/astral-sh/uv:0.13.5 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.7 AS uv
 
-FROM alpine:3.24.3 AS build
+FROM alpine:3.24.4 AS build
 
 COPY --from=uv /uv /bin/uv
 # Python is installed by uv (version from .python-version) rather than apk. Bytecode is
@@ -29,7 +29,7 @@ RUN cd "$(dirname "$(dirname "$(readlink -f "$(uv python find)")")")" &&\
 # can't start on the stripped Python
 RUN /usr/app/.venv/bin/kea-exporter --help >/dev/null
 
-FROM alpine:3.24.3
+FROM alpine:3.24.4
 
 RUN addgroup -g 101 kea &&\
     adduser kea -G kea -S
