@@ -16,14 +16,18 @@ COPY .python-version pyproject.toml uv.lock /usr/app/
 RUN uv python install &&\
     uv sync --locked --no-dev
 # Shrink the image by removing parts of the Python install the exporter doesn't use:
-# pip, Tcl/Tk, IDLE, headers, docs, and the shared libpython (the python binary is static)
+# pip, Tcl/Tk, IDLE, headers, docs, and the shared libpython (the python binary is static).
+# python3.* so a Python bump from Renovate doesn't need this edited.
 RUN cd "$(dirname "$(dirname "$(readlink -f "$(uv python find)")")")" &&\
     rm -rf include share bin/idle* bin/pip* bin/pydoc* bin/*-config \
         lib/libpython* lib/libtcl* lib/tcl* lib/tk* lib/itcl* lib/thread* \
-        lib/python3.14/config-* lib/python3.14/ensurepip lib/python3.14/idlelib \
-        lib/python3.14/pydoc_data lib/python3.14/site-packages/pip* \
-        lib/python3.14/tkinter lib/python3.14/turtledemo \
-        lib/python3.14/lib-dynload/_tkinter*
+        lib/python3.*/config-* lib/python3.*/ensurepip lib/python3.*/idlelib \
+        lib/python3.*/pydoc_data lib/python3.*/site-packages/pip* \
+        lib/python3.*/tkinter lib/python3.*/turtledemo \
+        lib/python3.*/lib-dynload/_tkinter*
+# Smoke test: the PR build fails, so Renovate won't automerge, if the exporter
+# can't start on the stripped Python
+RUN /usr/app/.venv/bin/kea-exporter --help >/dev/null
 
 FROM alpine:3.24.3
 

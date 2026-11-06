@@ -1,0 +1,32 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: ['config:recommended'],
+  // Every update is merged as soon as its PR build passes. The push to main
+  // then publishes the image and tags the repo v<kea-exporter>-alpine<alpine>
+  // (see .github/workflows/docker-publish.yml).
+  automerge: true,
+  // Renovate merges the PR itself once every check on it has passed. GitHub's
+  // native auto-merge would merge straight away here, because the org's
+  // default-branch ruleset doesn't require any status checks.
+  platformAutomerge: false,
+  // pyproject.toml only sets a floor (kea-exporter>=0.7.1), so new releases
+  // are picked up by updating uv.lock alone. Lock file maintenance also
+  // refreshes the transitive dependencies, which nothing else updates.
+  lockFileMaintenance: {
+    enabled: true,
+  },
+  packageRules: [
+    {
+      // One PR for the image's contents: the Alpine and uv images in the
+      // Dockerfile, Python in .python-version, and kea-exporter in uv.lock.
+      // Each merge publishes a release, so this keeps them from piling up.
+      matchManagers: ['dockerfile', 'pyenv', 'pep621'],
+      groupName: 'image',
+    },
+    {
+      // Combine all action updates into a single PR
+      matchManagers: ['github-actions'],
+      groupName: 'GitHub Actions',
+    },
+  ],
+}
