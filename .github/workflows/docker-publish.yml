@@ -1,6 +1,10 @@
 ---
 name: Docker
 
+# Release flow: Renovate updates kea-exporter (uv.lock) or Alpine (Dockerfile)
+# and automerges once the PR build passes. The push to main then publishes the
+# image tagged v<kea-exporter>-alpine<alpine> and tags this repo the same.
+
 on:
   schedule:
     - cron: '34 8 * * *'
@@ -15,9 +19,38 @@ permissions:
   contents: read
 
 jobs:
+  # uv.lock and the Dockerfile are the single source of the versions, so the
+  # image and git tags can't drift from what was built
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      exporter: ${{ steps.version.outputs.exporter }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - id: version
+        run: |
+          exporter=$(python3 -c 'import tomllib; print(next(p["version"] for p in tomllib.load(open("uv.lock", "rb"))["package"] if p["name"] == "kea-exporter"))')
+          # Both stages use the same Alpine tag; more than one is a mistake
+          alpine=$(sed -n 's/^FROM alpine:\([^ ]*\).*/\1/p' Dockerfile | sort -u)
+          if [ -z "$exporter" ] || [ -z "$alpine" ] || [ "$(echo "$alpine" | wc -l)" -ne 1 ]; then
+            echo "::error::Couldn't read one kea-exporter version from uv.lock (got '$exporter') and one Alpine tag from the Dockerfile (got '$alpine')"
+            exit 1
+          fi
+          {
+            echo "exporter=$exporter"
+            echo "release=$exporter-alpine$alpine"
+          } >> "$GITHUB_OUTPUT"
+          echo "Release v$exporter-alpine$alpine" >> "$GITHUB_STEP_SUMMARY"
+
   # Build, sign and push with Docker's reusable workflow
   # https://github.com/docker/github-builder
   build:
+    needs: version
     uses: docker/github-builder/.github/workflows/build.yml@v1
     permissions:
       contents: read # to fetch the repository content
@@ -30,7 +63,12 @@ jobs:
       meta-images: |
         ${{ vars.SHARED_WIF_LOCATON }}-docker.pkg.dev/${{ vars.SHARED_WIF_PROJECT }}/${{ vars.SHARED_WIF_REPO }}/${{ github.event.repository.name }}
         ghcr.io/battelleecology/${{ github.event.repository.name }}
+      # Images from main also carry the release (v0.7.1-alpine3.24.3) and the
+      # kea-exporter version alone (v0.7.1). A rebuild of the same versions
+      # (nightly, or a lock file refresh) moves those tags to the new image.
       meta-tags: |
+        type=raw,value=v${{ needs.version.outputs.release }},enable={{is_default_branch}}
+        type=raw,value=v${{ needs.version.outputs.exporter }},enable={{is_default_branch}}
         type=schedule
         type=ref,event=branch
         type=ref,event=tag
@@ -47,6 +85,27 @@ jobs:
         - registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+  # Tags the repo v<release> after the first successful publish of that
+  # release. Done here rather than by triggering on tag pushes because tags
+  # pushed with GITHUB_TOKEN don't start new workflow runs.
+  tag:
+    needs: [ version, build ]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: v${{ needs.version.outputs.release }}
+    steps:
+      - run: |
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --silent 2>/dev/null; then
+            echo "$TAG already exists; leaving it on its original commit"
+          else
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" --silent
+            echo "Tagged $GITHUB_SHA as $TAG"
+          fi
 
   # Scan with trivy and import sarif
   scan:
