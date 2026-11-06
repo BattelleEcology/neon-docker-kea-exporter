@@ -21,8 +21,10 @@ permissions:
 jobs:
   # uv.lock and the Dockerfile are the single source of the versions, so the
   # image and git tags can't drift from what was built
-  version:
+  plan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       exporter: ${{ steps.version.outputs.exporter }}
       release: ${{ steps.version.outputs.release }}
@@ -50,7 +52,7 @@ jobs:
   # Build, sign and push with Docker's reusable workflow
   # https://github.com/docker/github-builder
   build:
-    needs: version
+    needs: plan
     uses: docker/github-builder/.github/workflows/build.yml@v1
     permissions:
       contents: read # to fetch the repository content
@@ -67,8 +69,8 @@ jobs:
       # kea-exporter version alone (v0.7.1). A rebuild of the same versions
       # (nightly, or a lock file refresh) moves those tags to the new image.
       meta-tags: |
-        type=raw,value=v${{ needs.version.outputs.release }},enable={{is_default_branch}}
-        type=raw,value=v${{ needs.version.outputs.exporter }},enable={{is_default_branch}}
+        type=raw,value=v${{ needs.plan.outputs.release }},enable={{is_default_branch}}
+        type=raw,value=v${{ needs.plan.outputs.exporter }},enable={{is_default_branch}}
         type=schedule
         type=ref,event=branch
         type=ref,event=tag
@@ -88,16 +90,18 @@ jobs:
 
   # Tags the repo v<release> after the first successful publish of that
   # release. Done here rather than by triggering on tag pushes because tags
-  # pushed with GITHUB_TOKEN don't start new workflow runs.
+  # pushed with GITHUB_TOKEN don't start new workflow runs. GITHUB_TOKEN also
+  # can't tag a commit that changes .github/workflows/ (HTTP 403), so keep
+  # version bumps out of PRs that change workflows, or tag those by hand.
   tag:
-    needs: [ version, build ]
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [ plan, build ]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      TAG: v${{ needs.version.outputs.release }}
+      TAG: v${{ needs.plan.outputs.release }}
     steps:
       - run: |
           if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --silent 2>/dev/null; then

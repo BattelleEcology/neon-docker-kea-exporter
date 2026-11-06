@@ -1,9 +1,9 @@
 {
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
   extends: ['config:recommended'],
-  // Every update is merged as soon as its PR build passes. The push to main
-  // then publishes the image and tags the repo v<kea-exporter>-alpine<alpine>
-  // (see .github/workflows/docker-publish.yml).
+  // Every update, GitHub Actions included, is merged as soon as its PR build
+  // passes. The push to main then publishes the image and tags the repo
+  // v<kea-exporter>-alpine<alpine> (see .github/workflows/docker-publish.yml).
   automerge: true,
   // Renovate merges the PR itself once every check on it has passed. GitHub's
   // native auto-merge would merge straight away here, because the org's
@@ -24,9 +24,13 @@
       groupName: 'image',
     },
     {
-      // Combine all action updates into a single PR
+      // Combine all action updates into a single PR. Like every update here
+      // it's automerged once its PR build passes. It doesn't change the
+      // release versions, so it publishes the image but adds no new repo tag.
+      description: 'Automerge GitHub Actions updates',
       matchManagers: ['github-actions'],
       groupName: 'GitHub Actions',
+      automerge: true,
     },
   ],
 }
