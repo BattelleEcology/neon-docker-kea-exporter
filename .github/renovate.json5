@@ -27,9 +27,12 @@
       // Combine all action updates into a single PR. Like every update here
       // it's automerged once its PR build passes. It doesn't change the
       // release versions, so it publishes the image but adds no new repo tag.
+      // separateMajorMinor is off so that major updates join the group
+      // rather than getting a second "(major)" PR.
       description: 'Automerge GitHub Actions updates',
       matchManagers: ['github-actions'],
       groupName: 'GitHub Actions',
+      separateMajorMinor: false,
       automerge: true,
     },
   ],
